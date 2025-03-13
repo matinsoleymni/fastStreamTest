@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+torch
+pydantic
+numpy
+pandas
+torchvision
+torchaudio
+openpyxl
+requests
+streamlit
