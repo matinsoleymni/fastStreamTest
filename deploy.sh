@@ -56,6 +56,16 @@ map \$http_upgrade \$connection_upgrade {
     '' close;
 }
 
+upstream streamlit {
+    server localhost:8501;
+    keepalive 32;
+}
+
+upstream fastapi {
+    server localhost:8000;
+    keepalive 32;
+}
+
 server {
     server_name $DOMAIN_NAME;
     client_max_body_size 100M;
@@ -69,42 +79,53 @@ server {
     proxy_read_timeout 300;
     proxy_connect_timeout 300;
     proxy_send_timeout 300;
+    proxy_buffers 8 32k;
+    proxy_buffer_size 64k;
+
+    # گزینه‌های اضافی برای WebSocket
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection \$connection_upgrade;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
 
     location / {
-        proxy_pass http://localhost:8501;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
+        proxy_pass http://streamlit;
+        proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
         proxy_buffering off;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_cache_bypass \$http_upgrade;
     }
 
     location /api {
-        proxy_pass http://localhost:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_cache_bypass \$http_upgrade;
+        proxy_pass http://fastapi;
+        proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
         proxy_buffering off;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_cache_bypass \$http_upgrade;
     }
 
-    # تنظیمات WebSocket برای Streamlit
     location /_stcore/stream {
-        proxy_pass http://localhost:8501;
+        proxy_pass http://streamlit;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection \$connection_upgrade;
         proxy_set_header Host \$host;
         proxy_cache_bypass \$http_upgrade;
         proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location /_stcore/health {
+        proxy_pass http://streamlit;
+        proxy_http_version 1.1;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_redirect off;
     }
 }
 EOF
@@ -126,6 +147,43 @@ setup_ssl() {
     sudo certbot --nginx -d $DOMAIN_NAME --non-interactive --agree-tos -m $EMAIL --redirect
 }
 
+# پیکربندی Streamlit
+setup_streamlit_config() {
+    print_message "Setting up Streamlit configuration..."
+    
+    # ایجاد دایرکتوری پیکربندی
+    mkdir -p ~/.streamlit
+    
+    # ایجاد فایل پیکربندی
+    tee ~/.streamlit/config.toml << EOF
+[server]
+enableCORS = false
+enableXsrfProtection = false
+address = "0.0.0.0"
+port = 8501
+maxUploadSize = 200
+enableWebsocketCompression = false
+
+[browser]
+serverAddress = "$DOMAIN_NAME"
+serverPort = 443
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#F63366"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#262730"
+font = "sans serif"
+EOF
+
+    # ایجاد فایل پیکربندی اضافی
+    tee ~/.streamlit/credentials.toml << EOF
+[general]
+email = ""
+EOF
+}
+
 # پیکربندی Supervisor با تنظیمات محیطی
 setup_supervisor() {
     print_message "Setting up Supervisor..."
@@ -137,6 +195,13 @@ directory=$(pwd)
 command=$(pwd)/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000 --workers 4
 autostart=true
 autorestart=true
+startretries=3
+startsecs=10
+exitcodes=0,2
+stopsignal=QUIT
+stopwaitsecs=10
+killasgroup=true
+stopasgroup=true
 stderr_logfile=/var/log/fastapi.err.log
 stdout_logfile=/var/log/fastapi.out.log
 environment=PYTHONPATH="$(pwd)",PATH="$(pwd)/venv/bin"
@@ -146,31 +211,19 @@ EOF
     sudo tee /etc/supervisor/conf.d/streamlit.conf << EOF
 [program:streamlit]
 directory=$(pwd)
-command=$(pwd)/venv/bin/streamlit run ui.py --server.address 0.0.0.0 --server.port 8501 --server.maxUploadSize 100
+command=$(pwd)/venv/bin/streamlit run ui.py --server.address 0.0.0.0 --server.port 8501 --server.maxUploadSize 200 --server.enableWebsocketCompression false --server.enableCORS false --server.enableXsrfProtection false
 autostart=true
 autorestart=true
+startretries=3
+startsecs=10
+exitcodes=0,2
+stopsignal=QUIT
+stopwaitsecs=10
+killasgroup=true
+stopasgroup=true
 stderr_logfile=/var/log/streamlit.err.log
 stdout_logfile=/var/log/streamlit.out.log
 environment=PYTHONPATH="$(pwd)",PATH="$(pwd)/venv/bin"
-EOF
-
-    # ایجاد فایل پیکربندی Streamlit
-    mkdir -p ~/.streamlit
-    tee ~/.streamlit/config.toml << EOF
-[server]
-enableCORS = false
-enableXsrfProtection = false
-
-[browser]
-serverAddress = "$DOMAIN_NAME"
-serverPort = 8501
-
-[theme]
-primaryColor = "#F63366"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F0F2F6"
-textColor = "#262730"
-font = "sans serif"
 EOF
 
     # بازخوانی و به‌روزرسانی Supervisor
@@ -201,6 +254,7 @@ main() {
     install_system_packages
     setup_firewall
     setup_python_env
+    setup_streamlit_config
     setup_nginx
     setup_ssl
     setup_supervisor
@@ -210,20 +264,20 @@ main() {
     echo -e "${BLUE}Logs can be found in /var/log/supervisor/${NC}"
     echo -e "${BLUE}Firewall status:${NC}"
     sudo ufw status
-
-    # مشاهده وضعیت سرویس‌ها
-    sudo supervisorctl status
-
-    # راه‌اندازی مجدد یک سرویس
-    sudo supervisorctl restart fastapi
-    sudo supervisorctl restart streamlit
-
-    # راه‌اندازی مجدد همه سرویس‌ها
+    
+    # راه‌اندازی مجدد سرویس‌ها
     sudo supervisorctl restart all
-
-    # مشاهده لاگ‌ها
-    tail -f /var/log/fastapi.err.log
-    tail -f /var/log/streamlit.err.log
+    
+    # نمایش وضعیت
+    echo -e "${BLUE}Service status:${NC}"
+    sudo supervisorctl status
+    
+    # نمایش لاگ‌ها
+    echo -e "${BLUE}Recent logs:${NC}"
+    echo -e "${BLUE}FastAPI logs:${NC}"
+    tail -n 5 /var/log/fastapi.err.log
+    echo -e "${BLUE}Streamlit logs:${NC}"
+    tail -n 5 /var/log/streamlit.err.log
 }
 
 # اجرای اسکریپت
