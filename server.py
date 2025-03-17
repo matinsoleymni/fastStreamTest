@@ -74,13 +74,14 @@ column_names =['woman_age',
  'man_covid',
  'woman_covid',
  'man_covid_vaccination_history',
+ "woman_covid_vaccination_history",
  'adenomyosis',
  'dfi',
  'man_vitamin_d',
  'woman_vitamin_d',
  'Endometrial_thickness',
  'endometrial_pattern',
- 'pap_smear']
+ ]
 
 # **تعریف مدل ورودی برای دریافت داده‌ها از کاربر**
 class InputData(BaseModel):
@@ -151,13 +152,14 @@ class InputData(BaseModel):
     man_covid:float
     woman_covid:float
     man_covid_vaccination_history:float
+    woman_covid_vaccination_history:float
     adenomyosis:float
     dfi:float
     man_vitamin_d:float
     woman_vitamin_d:float
     Endometrial_thickness:float
     endometrial_pattern:float
-    pap_smear:float
+    
 
 # **بارگذاری مدل**
 input_dim = len(column_names)
@@ -176,6 +178,7 @@ async def predict(data: InputData):
     try:
         # **تبدیل داده‌های ورودی به لیست و سپس `Tensor`**
         input_values = [getattr(data, col) for col in column_names]
+        print(input_values)
         X_tensor = torch.tensor([input_values], dtype=torch.float32).to(device)
 
         # **پیش‌بینی مدل**
