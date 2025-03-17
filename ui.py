@@ -57,7 +57,7 @@ except ValueError:
     user_data["total_afc"] = 0
 
 # تبدیل ضخامت آندومتر به عدد
-endometrial_thickness_input = st.text_input("📏 ضخامت آندومتر (Endometrial Thickness)", "0.0")
+endometrial_thickness_input = st.text_input("📏 Endometrial Thickness", "0.0")
 try:
     user_data["Endometrial_thickness"] = float(endometrial_thickness_input)
 except ValueError:
@@ -66,7 +66,7 @@ except ValueError:
 
 # مپ کردن مقدار ABC به عدد
 abc_mapping = {"A": 1, "B": 0, "C": -1}
-user_data["endometrial_pattern"] = abc_mapping[st.selectbox("📝 الگوی آندومتر", ["A", "B", "C"])]
+user_data["endometrial_pattern"] = abc_mapping[st.selectbox("📝endometrial pattern ", ["A", "B", "C"])]
 
 clinical_features = [
     "cyst_aspiration", "diagnostic_hysteroscopy", "woman_therapeutic_laparoscopy",
@@ -75,8 +75,8 @@ clinical_features = [
     "salpingitis", "varicocele_surgery", "mother_smoking_and_opiates",
     "father_smoking_and_opiates", "father_alcohol_consumption",
     "mother_lupus_and_antiphospholipid_syndrome", "man_covid", "woman_covid",
-    "man_covid_vaccination_history", "adenomyosis", "dfi", "man_vitamin_d",
-    "woman_vitamin_d", "pap_smear"
+    "man_covid_vaccination_history", "woman_covid_vaccination_history","adenomyosis", "dfi", "man_vitamin_d",
+    "woman_vitamin_d"
 ]
 
 for feature in clinical_features:
